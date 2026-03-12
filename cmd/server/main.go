@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -8,6 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Karabas-borodas/weather_service.git/cmd/internal/client/http/geocoding"
+	"github.com/Karabas-borodas/weather_service.git/cmd/internal/client/http/open_meteo"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-co-op/gocron/v2"
@@ -38,13 +41,15 @@ func initJobs(scheduler gocron.Scheduler) ([]gocron.Job, error) {
 func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
+
+	httpClient := &http.Client{
+		Timeout: time.Second * 10,
+	}
+	geocodingClient := geocoding.NewClient(httpClient)
+
 	var wg sync.WaitGroup
 
 	var reqCount atomic.Uint64
-	// Register cron task once at startup.
-	// gocron.Every(1).Second().Do(func() {
-	// 	fmt.Println("cron started")
-	// })
 
 	// Start scheduler once in background.
 	s, err := gocron.NewScheduler()
@@ -62,11 +67,31 @@ func main() {
 		s.Start()
 	}()
 
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+	r.Get("/{city}", func(w http.ResponseWriter, r *http.Request) {
+		city := chi.URLParam(r, "city")
+		fmt.Printf("var SITY %s", city)
+		geoResp, err := geocodingClient.GetCoordinate(city)
+		if err != nil {
+			log.Print(err)
+		}
+		openMeteoClient := openmeteo.NewClient(httpClient)
+		if err != nil {
+			log.Print(err)
+		}
+		// resp, err := GetTemperature(resp)
+
+		res, err := openMeteoClient.GetTemperature(geoResp[0].Latitude, geoResp[0].Longitude)
+		if err != nil {
+			log.Print(err)
+		}
 		n := reqCount.Add(1)
-		fmt.Printf("request #%d from %s\n", n, r.RemoteAddr)
+		// fmt.Printf("request #%d from %s\n", n, r.RemoteAddr)
 		fmt.Printf("request #%d from %s\n", n, r.Body)
-		_, err := w.Write([]byte(fmt.Sprintf("welcome, request #%d\n", n)))
+		row, err := json.Marshal(res.Current.Temperature2M)
+		if err != nil {
+			log.Print(err)
+		}
+		_, err = w.Write(row)
 		if err != nil {
 			log.Print(err)
 		}
