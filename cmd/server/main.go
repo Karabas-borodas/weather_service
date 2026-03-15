@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"sync"
 	// "sync/atomic"
+	"context"
+	// "os"
 	"time"
 
 	"github.com/Karabas-borodas/weather_service.git/internal/client/http/geocoding"
@@ -14,21 +16,23 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-co-op/gocron/v2"
+	"github.com/jackc/pgx/v5"
 )
 
 const httpPort = ":3000"
 const city = "Moscow"
 
 type Reading struct {
-	Timestamp   time.Time
-	Temperatuer float64
+	Name        string    `db:"name"`
+	Timestamp   time.Time `db:"timestamp"`
+	Temperatuer float64   `db:"temperature"`
 }
 type Storage struct {
 	data map[string][]Reading
 	mu   sync.RWMutex
 }
 
-func initJobs(scheduler gocron.Scheduler, storage *Storage) ([]gocron.Job, error) {
+func initJobs(ctx context.Context, scheduler gocron.Scheduler, conn *pgx.Conn) ([]gocron.Job, error) {
 
 	httpClient := &http.Client{
 		Timeout: time.Second * 10,
@@ -55,24 +59,25 @@ func initJobs(scheduler gocron.Scheduler, storage *Storage) ([]gocron.Job, error
 					log.Print(err)
 					return
 				}
-				storage.mu.Lock()
-				defer storage.mu.Unlock()
+
 				timeStor, err := time.Parse("2006-01-02T15:04", openMeteoRes.Current.Time)
 				if err != nil {
 					log.Print(err)
 					return
 				}
-				if len(storage.data[city]) == 0 {
-					storage.data[city] = append(storage.data[city], Reading{
-						Timestamp:   timeStor,
-						Temperatuer: openMeteoRes.Current.Temperature2M,
-					})
-				} else {
-					storage.data[city][0] = Reading{
-						Timestamp:   timeStor,
-						Temperatuer: openMeteoRes.Current.Temperature2M,
-					}
+
+				_, err = conn.Exec(
+					ctx,
+					"insert into reading(name,temperature,				timestamp ) values ($1, $2, $3)",
+					city,
+					openMeteoRes.Current.Temperature2M, // float
+					timeStor,                           // timestamp
+				)
+				if err != nil {
+					log.Print(err)
+					return
 				}
+
 			},
 		),
 	)
@@ -85,6 +90,13 @@ func initJobs(scheduler gocron.Scheduler, storage *Storage) ([]gocron.Job, error
 func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, "postgres://anglefar:2434@127.0.0.1:5488/weather?sslmode=disable")
+	if err != nil {
+		panic(err)
+		// os.Exit(1)
+	}
+	defer conn.Close(ctx)
 
 	storage := Storage{
 		data: make(map[string][]Reading),
@@ -98,7 +110,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	jobs, err := initJobs(s, &storage)
+	jobs, err := initJobs(ctx, s, conn)
 	if err != nil {
 		panic(err)
 	}
@@ -113,19 +125,28 @@ func main() {
 		cityName := chi.URLParam(r, "city")
 		fmt.Printf("var SITY %s", cityName)
 
+		var reading Reading
+		err := conn.QueryRow(ctx,
+			"select name, timestamp,temperature from reading where name = $1 order by timestamp desc limit 1", city,
+		).Scan(&reading.Name, &reading.Timestamp, &reading.Temperatuer)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("internal error"))
+		}
+
 		storage.mu.RLock()
 		defer storage.mu.RUnlock()
 
-		resding, ok := storage.data[cityName]
-		if !ok {
-			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte("not found"))
-			return
-		}
+		// resding, ok := storage.data[cityName]
+		// if !ok {
+		// 	w.WriteHeader(http.StatusNotFound)
+		// 	w.Write([]byte("not found"))
+		// 	return
+		// }
 		// n := reqCount.Add(1)
 		// fmt.Printf("request #%d from %s\n", n, r.RemoteAddr)
 		// fmt.Printf("request #%d from %s\n", n, r.Body)
-		row, err := json.Marshal(resding)
+		row, err := json.Marshal(reading)
 		if err != nil {
 			log.Print(err)
 		}

@@ -1,0 +1,11 @@
+services:
+ pg:
+    image: postgres:18.0
+    restart: always
+    environment:
+      POSTGRES_USER: "anglefar"
+      POSTGRES_PASSWORD: "2434"
+      POSTGRES_DB: "weather"
+    ports:
+      - "5488:5432"
+
