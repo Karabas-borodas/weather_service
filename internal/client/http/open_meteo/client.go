@@ -26,7 +26,7 @@ type weatherResponse struct {
 
 func (c *client) GetTemperature(lat, long float64) (weatherResponse, error) {
 	resp, err := c.httpClient.Get(
-		fmt.Sprintf("https://api.open-meteo.com/v1/forecast?latitude=%f&longitude=%f&current=temperature_2m", lat, long))
+		fmt.Sprintf("https://api.open-meteo.com/v1/forecast?latitude=%f&longitude=%f&current=temperature_2mt&timezone=auto", lat, long))
 	if err != nil {
 		return weatherResponse{}, err
 	}
