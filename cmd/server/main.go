@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -44,7 +45,7 @@ func initJobs(ctx context.Context, scheduler gocron.Scheduler, conn *pgx.Conn) (
 	}
 	j, err := scheduler.NewJob(
 		gocron.DurationJob(
-			1*time.Second,
+			10*time.Second,
 		),
 		gocron.NewTask(
 			func() {
@@ -129,6 +130,15 @@ func main() {
 		err := conn.QueryRow(ctx,
 			"select name, timestamp,temperature from reading where name = $1 order by timestamp desc limit 1", city,
 		).Scan(&reading.Name, &reading.Timestamp, &reading.Temperatuer)
+
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				w.WriteHeader(http.StatusNotFound)
+				w.Write([]byte("not found"))
+				return
+			}
+		}
+
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte("internal error"))

@@ -6,6 +6,9 @@ services:
       POSTGRES_USER: "anglefar"
       POSTGRES_PASSWORD: "2434"
       POSTGRES_DB: "weather"
+    volumes:
+      - test_volume:/var/lib/postgresql     
     ports:
       - "5488:5432"
-
+volumes:
+  test_volume: {}
